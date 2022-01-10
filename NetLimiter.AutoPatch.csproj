@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net472</TargetFramework>
+		<TargetName>$(AssemblyName)</TargetName>
+		<LangVersion>8.0</LangVersion>
+		<OutputType>Exe</OutputType>
+		<NoWarn>CA1416</NoWarn> <!-- Validate platform compatibility -->
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="dnlib" Version="3.4.0" />
+		<PackageReference Include="ilmerge" Version="3.0.41" />
+		<PackageReference Include="System.ServiceProcess.ServiceController" Version="6.0.0" />
+	</ItemGroup>
+
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
+	  <Exec Command="$(ILMergeConsolePath) /out:NetLimiter.AutoPatch.exe $(TargetDir)NetLimiter.AutoPatch.exe $(TargetDir)dnlib.dll $(TargetDir)System.Diagnostics.EventLog.dll $(TargetDir)System.Security.Principal.Windows.dll $(TargetDir)System.ServiceProcess.ServiceController.dll" />
+	</Target>
+</Project>
