@@ -13,10 +13,10 @@ using System.Threading;
 
 namespace NetLimiter.AutoPatch
 {
-	class Program
-	{
+    class Program
+    {
         [DllImport("User32.dll", EntryPoint = "MessageBox", CharSet = CharSet.Auto)]
-        static extern int MB (IntPtr hWnd, string lpText, string lpCaption, uint uType);
+        static extern int MB(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
         static void MB(string text)
         {
@@ -199,7 +199,7 @@ namespace NetLimiter.AutoPatch
         }
 
         public static void Main(string[] args)
-		{
+        {
             if (!IsAdministrator())
             {
                 MB("Error: This application must be run with Administrator privileges.");
@@ -221,5 +221,5 @@ namespace NetLimiter.AutoPatch
 
             MB("Done! You can now start the NetLimiter application normally.");
         }
-	}
+    }
 }
