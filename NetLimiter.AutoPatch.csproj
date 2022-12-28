@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<TargetFramework>net472</TargetFramework>
 		<TargetName>$(AssemblyName)</TargetName>
-		<LangVersion>8.0</LangVersion>
+		<LangVersion>latest</LangVersion>
 		<OutputType>Exe</OutputType>
 		<NoWarn>CA1416</NoWarn> <!-- Validate platform compatibility -->
 	</PropertyGroup>
@@ -14,6 +14,7 @@
 	</ItemGroup>
 
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-	  <Exec Command="$(ILMergeConsolePath) /out:NetLimiter.AutoPatch.exe $(TargetDir)NetLimiter.AutoPatch.exe $(TargetDir)dnlib.dll $(TargetDir)System.Diagnostics.EventLog.dll $(TargetDir)System.Security.Principal.Windows.dll $(TargetDir)System.ServiceProcess.ServiceController.dll" />
+		<Exec Command="if not exist $(ProjectDir)\Merged mkdir $(ProjectDir)\Merged" />
+		<Exec Command="$(ILMergeConsolePath) /out:Merged\NetLimiter.AutoPatch.exe $(TargetDir)NetLimiter.AutoPatch.exe $(TargetDir)dnlib.dll $(TargetDir)System.Diagnostics.EventLog.dll $(TargetDir)System.Security.Principal.Windows.dll $(TargetDir)System.ServiceProcess.ServiceController.dll" />
 	</Target>
 </Project>

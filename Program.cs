@@ -3,6 +3,7 @@ using dnlib.DotNet.Emit;
 using dnlib.DotNet.Writer;
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -37,19 +38,29 @@ namespace NetLimiter.AutoPatch
             }
         }
 
-        // Computer\HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Locktime Software\NetLimiter 4
-        // field Path
-        static bool FindInstallLocation(out string path)
+        static bool FindInstallLocation(out string path, out int version)
         {
             var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Locktime Software\NetLimiter 4");
 
             if (key != null)
             {
                 path = (string)key.GetValue("Path");
+                version = 4;
+                return true;
+            }
+
+            // newer versions of NL4, and NL5 - unified registry path
+            key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Locktime Software\NetLimiter");
+
+            if (key != null)
+            {
+                path = (string)key.GetValue("Path");
+                version = ((string)key.GetValue("Version")).StartsWith("4") ? 4 : 5;
                 return true;
             }
 
             path = "";
+            version = 0;
             return false;
         }
 
@@ -88,7 +99,115 @@ namespace NetLimiter.AutoPatch
             Console.WriteLine("NetLimiter service started!");
         }
 
-        static void PatchAssembly(string installDirectory)
+        static Dictionary<string, List<Instruction>> patches_all = new()
+        {
+            {
+                "get_IsRegistered", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4_1),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_HasExpiration", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4_1),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_IsExpired", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4_1),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_ProductCode", new()
+                {
+                    new Instruction(OpCodes.Ldstr, "valid product code ;)"),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_Quantity", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4, 420),
+                    new Instruction(OpCodes.Ret)
+                }
+            }
+        };
+
+        static Dictionary<string, List<Instruction>> patches_v4 = new()
+        {
+            {
+                "get_RegistrationName", new()
+                {
+                    new Instruction(OpCodes.Ldstr, Environment.UserName),
+                    new Instruction(OpCodes.Ret)
+                }
+            }
+        };
+
+        static Dictionary<string, List<Instruction>> patches_v5 = new()
+        {
+            {
+                "get_RegName", new()
+                {
+                    new Instruction(OpCodes.Ldstr, Environment.UserName),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_ExtendedDaysLeft", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4, 69),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_DaysLeftRaw", new()
+                {
+                    new Instruction(OpCodes.Ldc_I4, 69),
+                    new Instruction(OpCodes.Ret)
+                }
+            },
+            {
+                "get_PlanId", new()
+                {
+                    new Instruction(OpCodes.Ldstr, "valid plan ;)"),
+                    new Instruction(OpCodes.Ret)
+                }
+            }
+        };
+
+        static void PerformPatches(TypeDef type, Dictionary<string, List<Instruction>> patches)
+        {
+            foreach (var kvp in patches)
+            {
+                // `foreach (var (methodName, patch) in patches)`
+                var methodName = kvp.Key;
+                var patch = kvp.Value;
+
+                var method = type.Methods.FirstOrDefault(m => m.Name == methodName);
+
+                if (method != null)
+                {
+                    method.Body.Instructions.Clear();
+
+                    foreach (var p in patch)
+                    {
+                        method.Body.Instructions.Add(p);
+                    }
+                }
+                else
+                {
+                    // log somewhere
+                }
+            }
+        }
+
+        static void PatchAssembly(string installDirectory, int version)
         {
             var targetPath = Path.Combine(installDirectory, "NetLimiter.dll");
             var backupPath = targetPath + ".backup";
@@ -121,74 +240,31 @@ namespace NetLimiter.AutoPatch
                 method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
             }
 
-            // license itself
+            // license class
             TypeDef licenseType = def.Types.FirstOrDefault(t => t.Name == "NLLicense");
 
-            // lazy loop!
-            licenseType.Methods.ToList().ForEach((method) =>
+            // set license type
             {
-                // can return true to testing version content as well
-                // but it's usually buggier
-                //method.Name == "get_IsTestingVersion"
+                var method = licenseType.Methods.FirstOrDefault(m => m.Name == "get_LicenseType");
 
-                // return true
-                if (method.Name == "get_IsRegistered")// is registered
-                {
-                    method.Body.Instructions.Clear();
+                method.Body.Instructions.Clear();
 
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldc_I4_1));
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
-                }
-
-                // return false
-                if (method.Name == "get_HasExpiration" || // can expire?
-                    method.Name == "get_IsExpired") // is expired
-                {
-                    method.Body.Instructions.Clear();
-
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldc_I4_0));
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
-                }
-
-                // set product code
-                if (method.Name == "get_ProductCode")
-                {
-                    method.Body.Instructions.Clear();
-
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldstr, "valid product code ;)"));
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
-                }
-
-                // set licensee
-                if (method.Name == "get_RegistrationName")
-                {
-                    method.Body.Instructions.Clear();
-
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldstr, Environment.UserName));
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
-                }
-
-                // quantity
-                if (method.Name == "get_Quantity")
-                {
-                    method.Body.Instructions.Clear();
-
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldc_I4, 420));
-                    method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
-                }
-
-                // set license type to enterprise
-                if (method.Name == "get_LicenseType")
+                if (version == 4)
                 {
                     var lt = def.Types.FirstOrDefault(t => t.Name == "NLLicenseType");
                     var field = lt.Fields.FirstOrDefault(f => f.Name == "Enterprice");
 
-                    method.Body.Instructions.Clear();
-
                     method.Body.Instructions.Add(new Instruction(OpCodes.Ldc_I4, lt.Fields.IndexOf(field) - 1));
+                }
+                else
+                {
+                    method.Body.Instructions.Add(new Instruction(OpCodes.Ldstr, "Enterprise"));
                     method.Body.Instructions.Add(new Instruction(OpCodes.Ret));
                 }
-            });
+            }
+
+            PerformPatches(licenseType, patches_all);
+            PerformPatches(licenseType, version == 4 ? patches_v4 : patches_v5);
 
             ModuleWriterOptions moduleWriterOptions = new ModuleWriterOptions(def)
             {
@@ -206,11 +282,30 @@ namespace NetLimiter.AutoPatch
                 Environment.Exit(1);
             }
 
-            if (FindInstallLocation(out var location))
+            bool usingCustomPath = false;
+            string customLocation = "";
+
+            if (args.Length > 0)
+            {
+                var files = Directory.EnumerateFiles(args[0]);
+                var file = files.FirstOrDefault(f => f.ToLowerInvariant().Contains("nlclientapp.exe"));
+
+                if (file != null)
+                {
+                    customLocation = args[0];
+                    usingCustomPath = true;
+                }
+                else
+                {
+                    MB("Error: Selected directory is not a valid NetLimiter installation.");
+                }
+            }
+            
+            if (FindInstallLocation(out var location, out var version) || usingCustomPath)
             {
                 var svc = new ServiceController("nlsvc");
                 StopNetLimiter(svc);
-                PatchAssembly(location);
+                PatchAssembly(usingCustomPath ? customLocation : location, version);
                 StartNetLimiter(svc);
             }
             else
